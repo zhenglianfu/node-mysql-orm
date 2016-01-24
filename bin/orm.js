@@ -119,7 +119,7 @@ var sqlString = {
         return exp.join(',');
     },
     dateToString: function(date){
-        return util.formatDate(date, 'yyyy-MM-dd');
+        return sqlString.formatDate(date, 'yyyy-MM-dd');
     },
     dateToTimestamp: function(date){
         if (util.isDate(date)) {
@@ -129,6 +129,27 @@ var sqlString = {
                 t= d.getTime();
             return isNaN(t) ? 0 : t;
         }
+    },
+    formatDate: function(date, pattern){
+        if (date == null || date == '' || (util.isDate(date) && isNaN(date.getFullYear()))) {
+            return null; // mysql 'NULL'
+        }
+        pattern = pattern || 'yyyy-MM-dd HH:mm:ss';
+        if (!util.isDate(date)) {
+            date = new Date(date);
+        }
+        var escapeStrs = {
+            'yyyy': date.getFullYear(),
+            'MM': date.getMonth() + 1,
+            'dd': date.getDate(),
+            'HH': date.getHours(),
+            'mm': date.getMinutes(),
+            'ss': date.getSeconds()
+        };
+        for (var i in escapeStrs) {
+            pattern = pattern.replace(new RegExp(i, 'g'), escapeStrs[i]);
+        }
+        return pattern;
     }
 };
 // resource setting
@@ -146,6 +167,26 @@ orm.getResource = function(){
 orm.format = function(sql, values){
     return sqlString.format(sql, values);
 };
+
+orm.DATABASE_TYPE = (function(){
+    var types = {};
+    ['CHAR', 'STRING', 'INT', 'FLOAT', 'DOUBLE', 'TIME', 'TIME_STAMP', 'DATE','DATE_TIME','YEAR'].forEach(function(v, i){
+        var f = function(){
+            return {
+                id: i,
+                type: v
+            };
+        };
+        f.toString = function(){
+            return v;
+        };
+        f.getTypeId = function(){
+            return i;
+        };
+        return types[v] = f;
+    });
+    return types;
+}());
 
 // TODO 添加事件监听 错误监听
 /**
@@ -199,6 +240,7 @@ Table.prototype = {
                 console.error(err);
             }
             fn(err, table._transferSet(result));
+            console.log(sqlString.format(sql, data));
         };
         return orm.getResource().getConnection(function(err, connect){
             connect.query(sql, data, proxyFn);
@@ -324,6 +366,20 @@ Table.prototype = {
         var idField = this.getId();
         return customVal;
     },
+    _escape : function(value, field){
+        switch (field.type.toUpperCase()) {
+            case orm.DATABASE_TYPE.CHAR.toString():
+            case orm.DATABASE_TYPE.STRING.toString():
+                return '' + value;
+                break;
+            case orm.DATABASE_TYPE.DATE.toString():
+                return sqlString.formatDate(value, 'yyyy-MM-dd');
+                break;
+            default:
+                return value;
+        }
+        return value;
+    },
     /**
      * row: {} or [{}, {}, ...]
      * fn: function
@@ -352,7 +408,7 @@ Table.prototype = {
                         value[i] = this._generateId(obj[this.fieldNames[i]]);
                     } else {
                         // TODO 在这里根据字段类型转换变量值
-                        value[i] = obj[this.fieldNames[i]];
+                        value[i] = this._escape(obj[this.fieldNames[i]], this.fields[i]);
                     }
                 }
                 values[r] = value;
